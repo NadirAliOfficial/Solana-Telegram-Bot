@@ -1,2 +1,5 @@
 python-telegram-bot  
 python-dotenv  
+solana
+solders
+

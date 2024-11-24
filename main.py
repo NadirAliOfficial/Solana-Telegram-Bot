@@ -2,6 +2,9 @@ import os
 import logging
 from dotenv import load_dotenv
 from telegram import Update
+from solana.rpc.api import Client
+from solders.pubkey import Pubkey 
+
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -71,9 +74,47 @@ async def limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Placeholder for the /balance command
-    logger.info("Command '/balance' received.")
-    await update.message.reply_text("Balance command received. Functionality coming soon!")
+
+    # Responds to the /balance command by fetching and displaying the Solana wallet balance.
+    
+    logger.info("Command '/balance' received.") 
+    
+
+    # Get the wallet address from environment variables.
+    wallet_address = os.getenv('SOL_WALLET')
+    if not wallet_address:
+        logger.error("SOL_WALLET environment variable not found.")  # Log if the wallet address is missing.
+        await update.message.reply_text("Error: Wallet address not configured.")  # Inform the user.
+        return
+
+    try:
+        # Initialize the Solana client.
+        client = Client("https://api.mainnet-beta.solana.com")
+
+        # Convert the wallet address to a Pubkey object.
+        public_key = Pubkey.from_string(wallet_address)
+
+        # Fetch the wallet balance from the Solana blockchain.
+        response = client.get_balance(public_key)
+
+        # Extract balance in lamports and convert to SOL.
+        lamports = response.value
+        sol_balance = lamports / 1_000_000_000  # 1 SOL = 10^9 lamports.
+
+        # Respond to the user with the wallet balance.
+        await update.message.reply_text(
+            f"Wallet Address: {wallet_address}\n"  # Display the wallet address.
+            f"Balance: {sol_balance:.9f} SOL"  # Display the balance in SOL.
+        )
+        logger.info(f"Balance retrieved: {sol_balance:.9f} SOL for {wallet_address}")  # Log the successful response.
+    except ValueError as e:
+        # Handle invalid wallet address errors.
+        logger.error(f"Invalid wallet address: {wallet_address}. Error: {e}")
+        await update.message.reply_text("Error: Invalid wallet address configured.")  # Inform the user.
+    except Exception as e:
+        # Handle other unexpected errors.
+        logger.error(f"Failed to fetch balance: {e}")
+        await update.message.reply_text("Error: Unable to fetch wallet balance. Please try again later.")  # Inform the user.
 
 
 async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
