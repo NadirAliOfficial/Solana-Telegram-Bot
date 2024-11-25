@@ -12,7 +12,7 @@ These are the commands you can use with the bot:
 - `/sell` - Sell the target token at the current market price.
 - `/limit` - Place an order to buy or sell at a specific price.
 - `/balance` - Check your account balance.
-- `/withdraw` - Withdraw funds to an external address.
+
 
 ## Required Libraries
 
@@ -38,3 +38,8 @@ python main.py
 ```
 
 That's it! Enjoy trading with your Solana Telegram Bot.
+
+
+
+# This Bot is created by Team Nadir Ali Khan.
+# Telegram : https://t.me/NAKProgrammer

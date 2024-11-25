@@ -339,3 +339,8 @@ def main() -> None:
 # Run the bot
 if __name__ == "__main__":
     main()
+
+
+
+#  This Bot is created by Team Nadir Ali Khan.
+# Telegram : https://t.me/NAKProgrammer
