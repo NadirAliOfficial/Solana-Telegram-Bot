@@ -4,6 +4,7 @@ import logging
 import requests
 from dotenv import load_dotenv
 from telegram import Update
+from telegram.ext import ConversationHandler
 from solana.rpc.api import Client
 from solders.keypair import Keypair # type: ignore
 from solders.pubkey import Pubkey  # type: ignore
@@ -22,6 +23,8 @@ from telegram.ext import (
 
 # Load environment variables from the .env file
 load_dotenv()
+
+
 RAYDIUM_API_URL = "https://api.raydium.io/v2/mainnet/ammV3-pools"
 # Enable logging
 logging.basicConfig(
@@ -76,7 +79,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/sell - Sell the target token\n"
         "/limit - Place a limit order\n"
         "/balance - Check account balance\n"
-        "/withdraw - Withdraw funds\n"
     )
 
 
@@ -96,6 +98,7 @@ def read_mint_addresses_from_file(file_path="mint.txt"):
     return mint_addresses
 
 # Command to handle the buy logic
+# Command to handle the buy logic
 async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Read mint addresses from the file
     mint_addresses_from_file = read_mint_addresses_from_file()
@@ -104,73 +107,57 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("No mint addresses found in the file.")
         return
 
-    # Log the mint addresses found from the file for debugging
-    logger.info(f"Mint Addresses from file: {mint_addresses_from_file}")
-
-    # Check if the mint address in the message is valid (use the first address in the file)
-    mint_address = mint_addresses_from_file[0]  # You can adjust logic to select different mint address
-    logger.info(f"Using mint address: '{mint_address}'")
-
-    # Trim any extra whitespace or newlines from the mint address
-    mint_address = mint_address.strip()
-    # Validate the mint address format
+    mint_address = mint_addresses_from_file[0].strip()
     if not re.match(CA_PATTERN, mint_address):
         await update.message.reply_text(f"The mint address '{mint_address}' is not valid.")
-        logger.error(f"Invalid mint address: '{mint_address}'")
         return
 
-    logger.info(f"Buying token with mint address: {mint_address}")
-    await update.message.reply_text(
-        f"Buying token with mint address: {mint_address}"
-    )
-
-    # Load the wallet's private key from environment variables (make sure this is securely handled)
+    # Initialize wallet
     load_dotenv()
     PRIVATE_KEY = os.getenv('PRIVATE_KEY')
     if not PRIVATE_KEY:
-        logger.error("Private key not found in environment.")
         await update.message.reply_text("Private key not configured. Please set the PRIVATE_KEY.")
         return
 
     try:
-        # Decode the private key and create the wallet keypair
-        private_key_bytes = base58.b58decode(PRIVATE_KEY)
-        wallet = Keypair.from_bytes(private_key_bytes)
+        wallet = Keypair.from_bytes(base58.b58decode(PRIVATE_KEY))
     except Exception as e:
-        logger.error(f"Error loading wallet from private key: {e}")
         await update.message.reply_text("Error loading wallet. Please check the private key.")
         return
 
     # Initialize Solana client
     client = Client("https://api.mainnet-beta.solana.com")
 
-    # Fetch Raydium pools to find the correct pool for the token mint address
-    response = requests.get(RAYDIUM_API_URL)
-    pools = response.json()
+    # Check wallet balance
+    wallet_balance = client.get_balance(wallet.public_key())['result']['value']
+    swap_amount_sol = 0.1
+    sol_in_lamports = int(swap_amount_sol * 1_000_000_000)
 
-    # Search for the correct liquidity pool
+    if wallet_balance < sol_in_lamports + 5000:  # Account for fees
+        await update.message.reply_text("Insufficient balance in your wallet.")
+        return
+
+    # Fetch Raydium pools
+    response = requests.get(RAYDIUM_API_URL)
+    if not response.ok:
+        await update.message.reply_text("Failed to fetch Raydium pools. Please try again later.")
+        return
+
+    pools = response.json()
     target_pool = next(
         (pool for pool in pools if pool['tokenMintA'] == mint_address or pool['tokenMintB'] == mint_address),
         None
     )
+
     if not target_pool:
-        logger.error("No liquidity pool found for the given mint address.")
         await update.message.reply_text("No liquidity pool found for the provided mint address.")
         return
 
     # Extract pool details
-    pool_id = Pubkey.from_string(target_pool['id'])
-    pool_authority = Pubkey.from_string(target_pool['authority'])
     pool_token_account_a = Pubkey.from_string(target_pool['tokenAccountA'])
-    pool_token_account_b = Pubkey.from_string(target_pool['tokenAccountB'])
 
-    # Define the amount of SOL to swap (e.g., 0.1 SOL)
-    swap_amount_sol = 0.1  # Adjust based on your requirement
-    sol_in_lamports = int(swap_amount_sol * 1_000_000_000)  # Convert SOL to lamports
-
-    # Build the transaction to buy the token
+    # Build the transaction
     transaction = Transaction()
-
     transaction.add(transfer(TransferParams(
         from_pubkey=wallet.public_key(),
         to_pubkey=pool_token_account_a,
@@ -180,24 +167,100 @@ async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Send the transaction
     try:
         response = await client.send_transaction(transaction, wallet, opts=TxOpts(skip_confirmation=False))
-        logger.info(f"Transaction sent: {response}")
         await update.message.reply_text(f"Successfully sent {swap_amount_sol} SOL to buy token from pool.")
+    except Exception as e:
+        await update.message.reply_text(f"Error during transaction: {e}")
+
+# Buy End
+
+# Sell Command Starts
+# Command to handle the sell logic
+async def sell_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Log the sell command invocation
+    logger.info("Command '/sell' received.")
+
+    # Load mint addresses from the file
+    mint_addresses_from_file = read_mint_addresses_from_file()
+    if not mint_addresses_from_file:
+        await update.message.reply_text("No mint addresses found in the file.")
+        return
+
+    # Select the first mint address from the file
+    mint_address = mint_addresses_from_file[0].strip()
+
+    # Validate the mint address format
+    if not re.match(CA_PATTERN, mint_address):
+        await update.message.reply_text(f"The mint address '{mint_address}' is not valid.")
+        return
+
+    # Load wallet private key from environment variables
+    load_dotenv()
+    PRIVATE_KEY = os.getenv('PRIVATE_KEY')
+    if not PRIVATE_KEY:
+        await update.message.reply_text("Private key not configured. Please set the PRIVATE_KEY.")
+        return
+
+    try:
+        wallet = Keypair.from_bytes(base58.b58decode(PRIVATE_KEY))
+    except Exception as e:
+        await update.message.reply_text("Error loading wallet. Please check the private key.")
+        return
+
+    # Initialize Solana client
+    client = Client("https://api.mainnet-beta.solana.com")
+
+    # Fetch the Raydium pools
+    response = requests.get(RAYDIUM_API_URL)
+    if not response.ok:
+        await update.message.reply_text("Failed to fetch Raydium pools. Please try again later.")
+        return
+
+    pools = response.json()
+
+    # Search for a pool containing the given mint address
+    target_pool = next(
+        (pool for pool in pools if pool['tokenMintA'] == mint_address or pool['tokenMintB'] == mint_address),
+        None
+    )
+    if not target_pool:
+        await update.message.reply_text("No liquidity pool found for the provided mint address.")
+        return
+
+    # Extract pool details
+    pool_token_account_a = Pubkey.from_string(target_pool['tokenAccountA'])
+    pool_token_account_b = Pubkey.from_string(target_pool['tokenAccountB'])
+
+    # Define the amount of tokens to sell
+    token_sell_amount = 1  # Replace with the desired amount to sell
+    token_sell_amount_lamports = int(token_sell_amount * 1_000_000_000)  # Convert to lamports
+
+    # Build the transaction to sell the token
+    transaction = Transaction()
+    transaction.add(transfer(TransferParams(
+        from_pubkey=wallet.public_key(),
+        to_pubkey=pool_token_account_b,
+        lamports=token_sell_amount_lamports
+    )))
+
+    # Send the transaction
+    try:
+        response = await client.send_transaction(transaction, wallet, opts=TxOpts(skip_confirmation=False))
+        logger.info(f"Transaction sent: {response}")
+        await update.message.reply_text(f"Successfully sold {token_sell_amount} tokens from pool.")
     except Exception as e:
         logger.error(f"Transaction failed: {e}")
         await update.message.reply_text(f"Error during transaction: {e}")
-# End
 
+#  Sell Command End
 
-async def sell_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Placeholder for the /sell command
-    logger.info("Command '/sell' received.")
-    await update.message.reply_text("Sell command received. Functionality coming soon!")
-
-
-async def limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Placeholder for the /limit command
+# Limit Command Starts
+async def limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE)-> None:
+    # Log the limit command invocation
     logger.info("Command '/limit' received.")
-    await update.message.reply_text("Limit order command received. Functionality coming soon!")
+    await update.message.reply_text("This command is not implemented yet.")
+    
+
+# Limit Command End
 
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -244,19 +307,6 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text("Error: Unable to fetch wallet balance. Please try again later.")  # Inform the user.
 
 
-async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Placeholder for the /withdraw command
-    logger.info("Command '/withdraw' received.")
-    await update.message.reply_text("Withdraw command received. Functionality coming soon!")
-    
-    
-
-# Message Handlers
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Echoes back any text message sent by the user
-    logger.info(f"Echoing message: {update.message.text}")
-    await update.message.reply_text(update.message.text)
-
 # Error Handler
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Logs errors caused by updates
@@ -273,20 +323,16 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("buy", buy_command))
     application.add_handler(CommandHandler("sell", sell_command))
-    application.add_handler(CommandHandler("limit", limit_command))
     application.add_handler(CommandHandler("balance", balance_command))
-    application.add_handler(CommandHandler("withdraw", withdraw_command))
+    application.add_handler(CommandHandler("limit", limit_command))
     application.add_handler(MessageHandler(filters.TEXT, message_handler))
     
-
-    # Register message handlers
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-
     # Register the error handler
     application.add_error_handler(error_handler)
 
     # Start polling for updates
     application.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 
 
