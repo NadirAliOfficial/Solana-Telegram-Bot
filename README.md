@@ -40,6 +40,9 @@ python main.py
 That's it! Enjoy trading with your Solana Telegram Bot.
 
 
+# Bot by Team Nadir Ali Khan  
 
-# This Bot is created by Team Nadir Ali Khan.
-# Telegram : https://t.me/NAKProgrammer
+This bot is proudly developed by **Team Nadir Ali Khan**.  
+
+## Contact Us  
+For any queries or support, reach out to us on Telegram: [@NAKProgrammer](https://t.me/NAKProgrammer)  
