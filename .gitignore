@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Dot files 
+.*
+!.gitignore
+!.git/
+
+
 # C extensions
 *.so
 
