@@ -4,7 +4,6 @@ import logging
 import asyncio
 import requests
 from solana.rpc.async_api import AsyncClient
-import json
 import aiohttp
 from telegram.ext import ConversationHandler
 from dotenv import load_dotenv
@@ -13,7 +12,6 @@ from telegram.ext import ConversationHandler
 from solana.rpc.api import Client
 from solders.keypair import Keypair # type: ignore
 from solders.pubkey import Pubkey  # type: ignore
-from datetime import datetime
 from solana.rpc.types import TxOpts
 from solders.system_program import TransferParams, transfer  
 import base58
@@ -32,11 +30,6 @@ load_dotenv()
 
 # Define states for the conversation
 AMOUNT = 1
-
-MAX_TRIAL_REQUESTS = 15
-PAID_REQUESTS = 1000  # Monthly paid requests
-SUBSCRIPTION_COST = 29  # Subscription cost in dollars
-USAGE_FILE = 'usage.json'
 
 # Enable logging
 logging.basicConfig(
@@ -124,73 +117,9 @@ async def get_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("Please enter a valid number for the amount of SOL.")
         return AMOUNT
 
-
-# Initialize or load usage data
-def load_usage_data():
-    if not os.path.exists(USAGE_FILE):
-        usage_data = {
-            "requests_count": 0,
-            "trial_completed": False,
-            "subscription_end": None
-        }
-        save_usage_data(usage_data)
-    else:
-        with open(USAGE_FILE, 'r') as file:
-            usage_data = json.load(file)
-    return usage_data
-
-def save_usage_data(usage_data):
-    with open(USAGE_FILE, 'w') as file:
-        json.dump(usage_data, file)
-
-async def increment_request_count():
-    usage_data = load_usage_data()
-    usage_data['requests_count'] += 1
-    if usage_data['requests_count'] >= MAX_TRIAL_REQUESTS and not usage_data["trial_completed"]:
-        usage_data["trial_completed"] = True
-    save_usage_data(usage_data)
-
-async def check_user_access():
-    usage_data = load_usage_data()
-    now = datetime.now()
-    
-    if usage_data["trial_completed"]:
-        # Check subscription
-        if not usage_data["subscription_end"] or datetime.fromisoformat(usage_data["subscription_end"]) < now:
-            return False  # Subscription expired or not started
-        elif usage_data['requests_count'] >= PAID_REQUESTS:
-            return False  # Monthly request limit reached
-    
-    return True
-
 async def process_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE, amount_in_sol: float) -> None:
     """Process the transaction after the amount is received."""
-    usage_data = load_usage_data()
-    
-    # Free trial or subscription status check
-    if not await check_user_access():
-        if usage_data["trial_completed"]:
-            await update.message.reply_text("Subscription expired or request limit reached. Please renew for $29/month.")
-        else:
-            await update.message.reply_text(
-                f"Free trial completed: You used {usage_data['requests_count']} requests out of {MAX_TRIAL_REQUESTS}."
-            )
-        return
-    
-    if not usage_data["trial_completed"]:
-        remaining_free_requests = MAX_TRIAL_REQUESTS - usage_data['requests_count']
-        await update.message.reply_text(
-            f"Free trial in progress: {usage_data['requests_count']} of {MAX_TRIAL_REQUESTS} requests used. "
-            f"{remaining_free_requests} remaining."
-        )
-    else:
-        remaining_requests = PAID_REQUESTS - usage_data['requests_count']
-        remaining_days = (datetime.fromisoformat(usage_data["subscription_end"]) - datetime.now()).days
-        await update.message.reply_text(
-            f"Subscription active: {remaining_requests} requests and {remaining_days} days remaining."
-        )
-
-    # Process swap transaction
+    # Read the first mint address from the 'mint.txt' file
     mint_file_path = 'mint.txt'
     try:
         with open(mint_file_path, 'r') as file:
@@ -198,39 +127,46 @@ async def process_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE
             if not mint_addresses:
                 await update.message.reply_text("No mint addresses found in the file.")
                 return
-            mint_address = mint_addresses[0].strip()
+            mint_address = mint_addresses[0].strip()  # Get the first mint address and strip any surrounding whitespace
     except FileNotFoundError:
         await update.message.reply_text(f"The file {mint_file_path} was not found.")
         return
 
     async with AsyncClient("https://api.mainnet-beta.solana.com") as client:
         keypair = Keypair.from_base58_string(os.getenv('PRIVATE_KEY'))
+
+        # Check balance
         balance_response = await client.get_balance(keypair.pubkey())
         wallet_balance = balance_response.value
         await update.message.reply_text(f"Wallet balance: {wallet_balance} lamports")
 
-        required_balance = 2039280
+        # Ensure balance is sufficient
+        required_balance = 2039280  # Adjust based on the expected fee
         if wallet_balance < required_balance:
             await update.message.reply_text("Insufficient SOL balance. Please top up your wallet.")
             return
 
-        required_lamports = int(amount_in_sol * 1e9) + required_balance
+        # Calculate required lamports (assuming a basic fee for the transaction)
+        required_lamports = int(amount_in_sol * 1e9) + required_balance  # Amount in lamports + expected transaction fee
         await update.message.reply_text(f"Required lamports for transaction: {required_lamports} lamports.")
 
+        # Swap parameters
         params = {
-            "from": "So11111111111111111111111111111111111111112",
-            "to": mint_address,
-            "amount": amount_in_sol,
-            "slip": 15,
+            "from": "So11111111111111111111111111111111111111112",  # SOL
+            "to": mint_address,  # Dynamic mint address from the file
+            "amount": amount_in_sol,  # From amount
+            "slip": 15,  # Increased slippage
             "payer": str(keypair.pubkey()),
-            "fee": 0.0001,
-            "txType": "legacy",
+            "fee": 0.0001,  # Adjusted priority fee
+            "txType": "legacy",  # Change to "v0" for versioned transactions
         }
 
+        # Send message with mint address
         await update.message.reply_text(f"Initiating swap with mint address: {mint_address} for {amount_in_sol} SOL.")
 
         try:
             async with aiohttp.ClientSession() as session:
+                # Get swap transaction
                 async with session.get(f"https://swap.solxtence.com/swap", params=params) as response:
                     data = await response.json()
                     if "transaction" not in data:
@@ -240,9 +176,11 @@ async def process_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE
                     serialized_tx = base64.b64decode(data["transaction"]["serializedTx"])
                     tx_type = data["transaction"]["txType"]
 
+            # Fetch the latest blockhash
             recent_blockhash = await client.get_latest_blockhash()
             blockhash = recent_blockhash.value.blockhash
 
+            # Deserialize and sign the transaction
             if tx_type == "legacy":
                 transaction = Transaction.from_bytes(serialized_tx)
                 transaction.sign([keypair], blockhash)
@@ -250,10 +188,9 @@ async def process_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text("TX type not supported :/")
                 return
 
+            # Send and confirm the transaction
             response = await client.send_raw_transaction(bytes(transaction))
-            await update.message.reply_text(
-                f"Swap successful! Transaction signature: `{response.value}`", parse_mode="Markdown"
-            )
+            await update.message.reply_text(f"Swap successful! Transaction signature: `{response.value}`", parse_mode="Markdown")
 
         except Exception as error:
             if "insufficient lamports" in str(error):
@@ -261,10 +198,6 @@ async def process_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE
             else:
                 await update.message.reply_text(f"Error performing swap: {error}")
 
-        finally:
-            # Increment the request count regardless of success or failure
-            await increment_request_count()
-                
 # Define the conversation handler
 conv_handler = ConversationHandler(
     entry_points=[CommandHandler('buy', buy_command)],
