@@ -24,4 +24,4 @@ Set your wallet private key and Telegram bot token in `.env`.
 
 ## License
 MIT
-<!-- updated: 2025-07-22-r01 -->
+<!-- updated: 2025-12-17-r01 -->
