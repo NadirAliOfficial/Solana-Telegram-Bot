@@ -1,48 +1,26 @@
-# Solana Telegram Trading Bot
+# Solana Auto Buy/Sell Telegram Bot
 
-This bot lets you trade tokens on the Solana blockchain through Telegram. It listens for contract addresses in Telegram groups and automatically buys or sells tokens based on the address provided.
+A Solana trading bot controlled via Telegram — supports auto buy/sell based on configurable triggers.
 
-## Commands
+## Features
+- Buy/sell Solana tokens via Telegram commands
+- Real-time price monitoring
+- Configurable slippage and transaction fees
+- Transaction confirmation and logging
 
-These are the commands you can use with the bot:
-
-- `/start` - Start the bot and get a welcome message.
-- `/help` - Show a list of commands and how to use them.
-- `/buy` - Buy the target token at the current market price.
-- `/sell` - Sell the target token at the current market price.
-- `/limit` - Place an order to buy or sell at a specific price.
-- `/balance` - Check your account balance.
-
-
-## Required Libraries
-
-To use the bot, install the required libraries by running:
-
-```bash
-pip install -r requirements.txt.txt
+## Requirements
+```
+pip install solana python-telegram-bot
 ```
 
 ## Configuration
+Set your wallet private key and Telegram bot token in `.env`.
 
-Before running the bot:
+## Commands
+- `/buy <token> <amount>` — buy token
+- `/sell <token> <amount>` — sell token
+- `/price <token>` — get current price
+- `/balance` — check wallet balance
 
-1. Add your bot token and wallet settings to the `.env` file.
-2. Adjust other settings as needed for your trades.
-
-## How to Run the Bot
-
-To start the bot, run:
-
-```bash
-python main.py
-```
-
-That's it! Enjoy trading with your Solana Telegram Bot.
-
-
-# Bot by Team Nadir Ali Khan  
-
-This bot is proudly developed by **Team Nadir Ali Khan**.  
-
-## Contact Us  
-For any queries or support, reach out to us on Telegram: [@NAKProgrammer](https://t.me/NAKProgrammer)  
+## License
+MIT
